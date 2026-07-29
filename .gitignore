@@ -1,0 +1,24 @@
+# Virtual environment
+venv/
+.venv/
+pagepulse_ENV/
+
+# Environment variables
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Logs
+logs/*.log
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
