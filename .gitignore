@@ -2,7 +2,7 @@
 venv/
 .venv/
 pagepulse_ENV/
-pagepulse.ipynb
+notebooks/pagepulse.ipynb
 data/cleaned_data/
 
 # Environment variables
