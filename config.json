@@ -1,0 +1,4 @@
+{
+    "raw_data": "data/raw_data/books_data.csv",
+    "cleaned_data": "data/cleaned_data/books_data.csv"
+}
