@@ -1,7 +1,9 @@
 """PagePulse book catalogue ETL pipeline."""
 
 import argparse
+import json
 import os
+import re
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -32,11 +34,27 @@ class PagePulsePipeline:
         self.base_url = "https://books.toscrape.com/"
 
         self.project_root = Path(__file__).resolve().parents[1]
-        self.raw_file = self.project_root / "data/raw_data/books_data.csv"
-        self.cleaned_file = self.project_root / "data/cleaned_data/books_data.csv"
+        config_path = self.project_root / "config.json"
+        with config_path.open(encoding="utf-8") as config_file:
+            config = json.load(config_file)
+
+        required_paths = ["raw_data", "cleaned_data"]
+        missing_paths = [key for key in required_paths if not config.get(key)]
+        if missing_paths:
+            raise ValueError(
+                "Missing config paths: " + ", ".join(missing_paths)
+            )
+
+        self.raw_file = self._resolve_path(config["raw_data"])
+        self.cleaned_file = self._resolve_path(config["cleaned_data"])
         self.schema_file = self.project_root / "sql/schema.sql"
 
         load_dotenv(self.project_root / ".env")
+
+    def _resolve_path(self, configured_path):
+        """Resolve a config path relative to the project root."""
+        path = Path(configured_path)
+        return path if path.is_absolute() else self.project_root / path
 
     def create_driver(self):
         """Create a Chrome browser for the extraction step."""
@@ -79,10 +97,13 @@ class PagePulsePipeline:
 
                 for book in books:
                     record = self._extract_book_card(book, page_url)
-                    record["categories"] = self._extract_category(
+                    category, detail_availability = self._extract_book_details(
                         driver,
                         record["book_urls"],
                     )
+                    record["categories"] = category
+                    if detail_availability is not None:
+                        record["availability"] = detail_availability
                     records.append(record)
 
                 print(
@@ -100,7 +121,6 @@ class PagePulsePipeline:
         """Extract fields visible on one catalogue card."""
         title = book.select_one("h3 a")
         price = book.select_one("p.price_color")
-        availability = book.select_one("p.instock.availability")
         rating = book.select_one("p.star-rating")
         image = book.select_one("img")
 
@@ -112,11 +132,7 @@ class PagePulsePipeline:
 
         return {
             "book_names": title.get("title") if title else None,
-            "availability": (
-                availability.get_text(" ", strip=True)
-                if availability
-                else None
-            ),
+            "availability": None,
             "ratings": rating_word,
             "prices": price.get_text(strip=True) if price else None,
             "categories": None,
@@ -130,12 +146,14 @@ class PagePulsePipeline:
                 if image and image.get("src")
                 else None
             ),
+            "source_website": self.base_url,
+            "scraped_at": pd.Timestamp.now(tz="UTC"),
         }
 
-    def _extract_category(self, driver, book_url):
-        """Read the category from a book detail page."""
+    def _extract_book_details(self, driver, book_url):
+        """Read category and full availability from a book detail page."""
         if not book_url:
-            return None
+            return None, None
 
         driver.get(book_url)
         WebDriverWait(driver, 10).until(
@@ -144,7 +162,21 @@ class PagePulsePipeline:
 
         detail_page = BeautifulSoup(driver.page_source, "html.parser")
         category = detail_page.select_one("ul.breadcrumb li:nth-of-type(3) a")
-        return category.get_text(strip=True) if category else None
+
+        availability = None
+        for row in detail_page.select("table.table-striped tr"):
+            heading = row.select_one("th")
+            value = row.select_one("td")
+            if heading and heading.get_text(strip=True) == "Availability":
+                availability_text = (
+                    value.get_text(" ", strip=True) if value else ""
+                )
+                match = re.search(r"\d+", availability_text)
+                availability = int(match.group()) if match else None
+                break
+
+        category_name = category.get_text(strip=True) if category else None
+        return category_name, availability
 
     def transform(self, dataframe):
         """Clean values and enforce the expected data types."""
@@ -156,6 +188,7 @@ class PagePulsePipeline:
             "categories",
             "book_urls",
             "book_images",
+            "source_website",
         ]
         for column in text_columns:
             books[column] = books[column].astype("string").str.strip()
@@ -167,11 +200,21 @@ class PagePulsePipeline:
             .str.replace(",", "", regex=False)
         )
         books["prices"] = pd.to_numeric(books["prices"], errors="coerce")
+        books["availability"] = pd.to_numeric(
+            books["availability"],
+            errors="coerce",
+        ).astype("Int64")
 
         books["ratings"] = books["ratings"].replace(self.RATING_MAP)
         books["ratings"] = pd.to_numeric(
             books["ratings"],
             errors="coerce",
+        ).astype("Int64")
+        books["scraped_at"] = pd.to_datetime(
+            books["scraped_at"],
+            errors="coerce",
+            format="mixed",
+            utc=True,
         )
 
         required_columns = [
@@ -181,6 +224,8 @@ class PagePulsePipeline:
             "prices",
             "categories",
             "book_urls",
+            "source_website",
+            "scraped_at",
         ]
         books = books.dropna(subset=required_columns)
         books = books.drop_duplicates(subset="book_urls", keep="first")
@@ -188,6 +233,7 @@ class PagePulsePipeline:
         books = books[books["prices"] >= 0]
 
         books["ratings"] = books["ratings"].astype("int64")
+        books["availability"] = books["availability"].astype("int64")
         books["prices"] = books["prices"].round(2)
 
         return books.reset_index(drop=True)
