@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -46,6 +47,12 @@ class PagePulsePipeline:
             )
 
         self.raw_file = self._resolve_path(config["raw_data"])
+        self.raw_archive_dir = self._resolve_path(
+            config.get(
+                "raw_archive",
+                str(Path(config["raw_data"]).parent / "archive"),
+            )
+        )
         self.cleaned_file = self._resolve_path(config["cleaned_data"])
         self.schema_file = self.project_root / "sql/schema.sql"
 
@@ -303,15 +310,24 @@ class PagePulsePipeline:
 
         print(f"Data validation passed for {len(books)} books")
 
+    def _raw_snapshot_path(self):
+        """Return a unique UTC-stamped path for an immutable raw extract."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        return self.raw_archive_dir / f"books_data_{timestamp}.csv"
+
     def save_csv_files(self, raw_data, cleaned_data):
-        """Save raw and cleaned pipeline outputs."""
+        """Save the latest outputs and retain a historical raw snapshot."""
         self.raw_file.parent.mkdir(parents=True, exist_ok=True)
+        self.raw_archive_dir.mkdir(parents=True, exist_ok=True)
         self.cleaned_file.parent.mkdir(parents=True, exist_ok=True)
 
+        raw_snapshot = self._raw_snapshot_path()
+        raw_data.to_csv(raw_snapshot, index=False)
         raw_data.to_csv(self.raw_file, index=False)
         cleaned_data.to_csv(self.cleaned_file, index=False)
 
         print(f"Raw data saved to {self.raw_file}")
+        print(f"Raw data snapshot preserved at {raw_snapshot}")
         print(f"Cleaned data saved to {self.cleaned_file}")
 
     def _database_settings(self):

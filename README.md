@@ -55,7 +55,9 @@ The scraper follows catalogue pagination dynamically, visits each book detail pa
 pagepulse-booksite-etl-pipeline/
 ├── data/
 │   ├── raw_data/
-│   │   └── books_data.csv
+│   │   ├── books_data.csv
+│   │   └── archive/
+│   │       └── books_data_<UTC timestamp>.csv
 │   └── cleaned_data/
 │       └── books_data.csv
 ├── notebooks/
@@ -172,7 +174,8 @@ Open `pagepulse-etl.ipynb` and run its cells in order. The notebook:
 2. Starts a visible Chrome browser.
 3. Visits catalogue and book-detail pages.
 4. Extracts all book records.
-5. Saves the unmodified result to `data/raw_data/books_data.csv`.
+5. Saves the unmodified result to `data/raw_data/books_data.csv` and retains a
+   UTC-timestamped snapshot in `data/raw_data/archive/`.
 6. Converts prices to numbers and ratings from words to integers.
 7. Saves the transformed result to `data/cleaned_data/books_data.csv`.
 8. Creates the configured PostgreSQL database when necessary.
