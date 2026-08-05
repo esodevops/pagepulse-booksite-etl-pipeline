@@ -182,6 +182,24 @@ class PagePulsePipeline:
         """Clean values and enforce the expected data types."""
         books = dataframe.copy()
 
+        expected_columns = {
+            "book_names",
+            "availability",
+            "ratings",
+            "prices",
+            "categories",
+            "book_urls",
+            "book_images",
+            "source_website",
+            "scraped_at",
+        }
+        missing_columns = expected_columns.difference(books.columns)
+        if missing_columns:
+            raise ValueError(
+                "Missing required columns: "
+                + ", ".join(sorted(missing_columns))
+            )
+
         text_columns = [
             "book_names",
             "availability",
@@ -236,7 +254,54 @@ class PagePulsePipeline:
         books["availability"] = books["availability"].astype("int64")
         books["prices"] = books["prices"].round(2)
 
-        return books.reset_index(drop=True)
+        books = books.reset_index(drop=True)
+        self.validate_data(books)
+        return books
+
+    def validate_data(self, books):
+        """Validate cleaned records before saving or loading them."""
+        errors = []
+        required_columns = [
+            "book_names",
+            "availability",
+            "ratings",
+            "prices",
+            "categories",
+            "book_urls",
+            "source_website",
+            "scraped_at",
+        ]
+
+        if books.empty:
+            errors.append("the dataset is empty")
+        if books[required_columns].isna().any().any():
+            errors.append("required fields contain null values")
+        if books["book_urls"].duplicated().any():
+            errors.append("duplicate book URLs were found")
+        if not books["ratings"].between(1, 5).all():
+            errors.append("ratings must be between 1 and 5")
+        if (books["prices"] < 0).any():
+            errors.append("prices cannot be negative")
+        if (books["availability"] < 0).any():
+            errors.append("availability cannot be negative")
+
+        text_columns = [
+            "book_names",
+            "categories",
+            "book_urls",
+            "source_website",
+        ]
+        for column in text_columns:
+            if books[column].astype("string").str.strip().eq("").any():
+                errors.append(f"{column} contains blank values")
+
+        if books["scraped_at"].dt.tz is None:
+            errors.append("scraped_at must use a UTC timezone")
+
+        if errors:
+            raise ValueError("Data validation failed: " + "; ".join(errors))
+
+        print(f"Data validation passed for {len(books)} books")
 
     def save_csv_files(self, raw_data, cleaned_data):
         """Save raw and cleaned pipeline outputs."""

@@ -18,38 +18,23 @@ The dataset can help a catalogue, merchandising, or commercial team answer quest
 ## Architecture diagram
 
 ```mermaid
+%%{init: {"themeVariables": {"fontSize": "18px", "lineColor": "#084c45"}}}%%
 flowchart LR
-    source["Books to Scrape website"]
+    source["BOOKS TO SCRAPE"] --> extract["EXTRACT<br/>Selenium + Beautiful Soup"]
+    extract --> raw["RAW CSV"]
+    raw --> transform["TRANSFORM + VALIDATE<br/>pandas"]
+    transform --> clean["CLEANED CSV"]
+    clean --> database[("POSTGRESQL<br/>pagepulse.books_data")]
+    database --> analytics["SQL ANALYSIS<br/>BookSphere insights"]
 
-    subgraph extraction["Extraction layer"]
-        selenium["Selenium and Chrome"]
-        parser["Beautiful Soup parser"]
-    end
+    config["config.json"] -. "file paths" .-> raw
+    env[".env"] -. "credentials" .-> database
 
-    subgraph processing["Processing layer"]
-        raw["Raw CSV"]
-        pandas["pandas cleaning and validation"]
-        clean["Cleaned CSV"]
-    end
-
-    subgraph storage["Storage layer"]
-        loader["SQLAlchemy and psycopg2"]
-        database[("PostgreSQL")]
-        table["pagepulse.books_data"]
-    end
-
-    subgraph analytics["Analytics layer"]
-        queries["Business SQL queries"]
-        insights["BookSphere insights"]
-    end
-
-    config["config.json"] -. "CSV paths" .-> raw
-    config -. "CSV paths" .-> clean
-    env[".env"] -. "Database credentials" .-> loader
-
-    source --> selenium --> parser --> raw
-    raw --> pandas --> clean --> loader
-    loader --> database --> table --> queries --> insights
+    classDef main fill:#dceee7,stroke:#084c45,stroke-width:3px,color:#132a2a,font-weight:bold;
+    classDef store fill:#fff4d6,stroke:#9b6812,stroke-width:3px,color:#132a2a,font-weight:bold;
+    class source,extract,transform,analytics main;
+    class raw,clean,database store;
+    linkStyle default stroke:#084c45,stroke-width:3px;
 ```
 
 The scraper follows catalogue pagination dynamically, visits each book detail page, and extracts the complete record. The raw layer preserves the scraped output, while pandas converts ratings, prices, availability counts, and UTC timestamps into analytics-ready values. SQLAlchemy loads the cleaned records into the governed PostgreSQL table, where the SQL analysis produces BookSphere business findings.
@@ -407,13 +392,15 @@ Contains 10 readable analysis questions:
 
 ## Data quality rules
 
-The governed PostgreSQL schema enforces the following rules:
+Both ETL implementations validate the cleaned dataset before it is saved or loaded. The PostgreSQL schema provides an additional enforcement layer.
 
-- Book names, availability, ratings, prices, categories, and product URLs are required.
+- The expected columns must be present and the dataset cannot be empty.
+- Book names, availability, ratings, prices, categories, product URLs, source website, and scrape timestamps are required.
 - Ratings must be between 1 and 5.
-- Prices cannot be negative.
-- Book names, categories, and product URLs cannot be blank.
+- Prices and availability counts cannot be negative.
+- Book names, categories, product URLs, and source website values cannot be blank.
 - Product URLs must be unique.
+- `scraped_at` must be a timezone-aware UTC datetime.
 
 ## Troubleshooting
 
